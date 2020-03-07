@@ -15,6 +15,12 @@ public class UmsAdminLoginParam {
     @ApiModelProperty(value = "密码", required = true)
     @NotEmpty(message = "密码不能为空")
     private String password;
+    @ApiModelProperty(value = "验证码", required = true)
+    @NotEmpty(message = "验证码不能为空")
+    private String code;
+    @ApiModelProperty(value = "验证码ID", required = true)
+    @NotEmpty(message = "验证码ID不能为空")
+    private String uuid;
 
     public String getUsername() {
         return username;
@@ -30,5 +36,21 @@ public class UmsAdminLoginParam {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public String getCode() {
+        return code;
+    }
+
+    public void setCode(String code) {
+        this.code = code;
+    }
+
+    public String getUuid() {
+        return uuid;
+    }
+
+    public void setUuid(String uuid) {
+        this.uuid = uuid;
     }
 }

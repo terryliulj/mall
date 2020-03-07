@@ -1,5 +1,6 @@
 package com.macro.mall.controller;
 
+import cn.hutool.core.util.IdUtil;
 import com.macro.mall.common.api.CommonPage;
 import com.macro.mall.common.api.CommonResult;
 import com.macro.mall.dto.UmsAdminLoginParam;
@@ -8,8 +9,10 @@ import com.macro.mall.dto.UpdateAdminPasswordParam;
 import com.macro.mall.model.UmsAdmin;
 import com.macro.mall.model.UmsPermission;
 import com.macro.mall.model.UmsRole;
+import com.macro.mall.service.RedisService;
 import com.macro.mall.service.UmsAdminService;
 import com.macro.mall.service.UmsRoleService;
+import com.wf.captcha.ArithmeticCaptcha;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +26,7 @@ import java.security.Principal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 
 /**
  * 后台用户管理
@@ -40,6 +44,12 @@ public class UmsAdminController {
     private UmsAdminService adminService;
     @Autowired
     private UmsRoleService roleService;
+    @Autowired
+    private RedisService redisService;
+    @Value("${redis.key.prefix.authCode}")
+    private String REDIS_KEY_PREFIX_AUTH_CODE;
+    @Value("${redis.key.expire.authCode}")
+    private Long AUTH_CODE_EXPIRE_SECONDS;
 
     @ApiOperation(value = "用户注册")
     @RequestMapping(value = "/register", method = RequestMethod.POST)
@@ -56,6 +66,15 @@ public class UmsAdminController {
     @RequestMapping(value = "/login", method = RequestMethod.POST)
     @ResponseBody
     public CommonResult login(@RequestBody UmsAdminLoginParam umsAdminLoginParam, BindingResult result) {
+        String uuid = umsAdminLoginParam.getUuid();
+        String realAuthCode = uuid == null ? null : redisService.get(uuid);
+        String code = umsAdminLoginParam.getCode();
+        if (uuid != null && realAuthCode == null) {
+            return CommonResult.validateFailed("验证码已过期，请点击验证码图片刷新后再试");
+        }
+        if (code == null || !code.equals(realAuthCode)) {
+            return CommonResult.validateFailed("验证码错误");
+        }
         String token = adminService.login(umsAdminLoginParam.getUsername(), umsAdminLoginParam.getPassword());
         if (token == null) {
             return CommonResult.validateFailed("用户名或密码错误");
@@ -214,5 +233,42 @@ public class UmsAdminController {
     public CommonResult<List<UmsPermission>> getPermissionList(@PathVariable Long adminId) {
         List<UmsPermission> permissionList = adminService.getPermissionList(adminId);
         return CommonResult.success(permissionList);
+    }
+
+    @ApiOperation("获取验证码图片和对应的uuid")
+    @RequestMapping(value = "/verification-code", method = RequestMethod.GET)
+    @ResponseBody
+    public CommonResult genVerificationCode(HttpServletRequest request) {
+        // 算术类型 https://gitee.com/whvse/EasyCaptcha
+        ArithmeticCaptcha captcha = new ArithmeticCaptcha(111, 36);
+        // 几位数运算，默认是两位
+        captcha.setLen(2);
+        // 获取运算的结果
+        String result = captcha.text();
+        StringBuilder sb = new StringBuilder();
+        sb.append(REDIS_KEY_PREFIX_AUTH_CODE);
+        Random random = new Random();
+        for(int i=0;i<2;i++){
+            sb.append(random.nextInt(10));
+        }
+        sb.append(IdUtil.simpleUUID());
+        String uuid = sb.toString();
+        //验证码存储到redis
+        redisService.set(uuid, result);
+        redisService.expire(uuid, AUTH_CODE_EXPIRE_SECONDS);
+        Map<String, String> imgMap = new HashMap<>(2);
+        imgMap.put("img", captcha.toBase64());
+        imgMap.put("uuid", uuid);
+        return CommonResult.success(imgMap);
+    }
+
+    @ApiOperation("检查验证码是否正确。用于预判提示")
+    @RequestMapping(value = "/verify-code", method = RequestMethod.GET)
+    @ResponseBody
+    public CommonResult checkVerificationCode(@RequestParam(value = "code") String code, @RequestParam String uuid) {
+        String realAuthCode = redisService.get(uuid);
+        Map<String, Boolean> resultMap = new HashMap<>(1);
+        resultMap.put("valid", code != null && code.equals(realAuthCode));
+        return CommonResult.success(resultMap);
     }
 }
